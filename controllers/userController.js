@@ -2,6 +2,8 @@ const User = require("../models/User");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const Store = require("../models/storeSchema");
+const uploadToCloudinary = require("../middlewares/uploadToCloudinary");
+
 // @desc    Sign up a user
 // @route   POST /api/users/signup
 // @access  Public
@@ -130,13 +132,44 @@ exports.updateUserRole = async (req, res) => {
 
 exports.createStore = async (req, res) => {
   const { userId, name, description, image } = req.body;
+
+  const fileBuffer = req.file.buffer; // Access the file buffer from memory
+  const fileFormat = req.file.mimetype.split("/")[1]; // Get the file format (e.g., 'jpg', 'png')
+  console.log(fileBuffer, fileFormat);
+  if (fileBuffer || fileFormat) {
+    let imageUrl;
+    try {
+      // Upload the buffer directly to Cloudinary
+      const cloudinaryResponse = await uploadToCloudinary(
+        fileBuffer,
+        fileFormat
+      );
+
+      if (!cloudinaryResponse) {
+        return res
+          .status(500)
+          .json({ message: "Error uploading file to Cloudinary" });
+      }
+      imageUrl = cloudinaryResponse.secure_url;
+    } catch (error) {
+      return res
+        .status(500)
+        .json({ message: `Error uploading file: ${error.message}` });
+    }
+  }
+
   if (!userId || !name || !description) {
     return res.status(400).json({ message: "All fields are required" });
   }
 
   try {
-    const { userId, name, description, image } = req.body;
-    const store = new Store({ user: userId, name, description, image });
+    const { userId, name, description } = req.body;
+    const store = new Store({
+      user: userId,
+      name,
+      description,
+      image: imageUrl,
+    });
     await store.save();
     res.status(201).json({ message: "Store created successfully", store });
   } catch (error) {
@@ -147,20 +180,99 @@ exports.createStore = async (req, res) => {
 exports.editStore = async (req, res) => {
   try {
     const { storeId, name, description, image } = req.body;
-    if (!storeId) {
-      return res.status(400).json({ message: "Store ID is required" });
+    const fileBuffer = req.file.buffer; // Access the file buffer from memory
+    const fileFormat = req.file.mimetype.split("/")[1]; // Get the file format (e.g., 'jpg', 'png')
+    if (fileBuffer || fileFormat) {
+      let imageUrl;
+      try {
+        // Upload the buffer directly to Cloudinary
+        const cloudinaryResponse = await uploadToCloudinary(
+          fileBuffer,
+          fileFormat
+        );
+        if (!cloudinaryResponse) {
+          return res
+            .status(500)
+            .json({ message: "Error uploading file to Cloudinary" });
+        }
+        imageUrl = cloudinaryResponse.secure_url;
+
+        if (!storeId) {
+          return res.status(400).json({ message: "Store ID is required" });
+        }
+
+        console.log(storeId, name, description, imageUrl);
+        const updatedStore = await Store.findByIdAndUpdate(
+          storeId,
+          { name, description, image: imageUrl },
+          { new: true }
+        );
+        console.log(updatedStore);
+        if (!updatedStore) {
+          return res.status(404).json({ message: "Store not found" });
+        }
+        res
+          .status(200)
+          .json({ message: "Store updated successfully", store: updatedStore });
+      } catch (error) {
+        return res
+          .status(500)
+          .json({ message: `Error uploading file: ${error.message}` });
+      }
     }
-    const updatedStore = await Store.findByIdAndUpdate(
-      storeId,
-      { name, description, image },
-      { new: true }
-    );
-    if (!updatedStore) {
-      return res.status(404).json({ message: "Store not found" });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+exports.updateUserProfile = async (req, res) => {
+  try {
+    const { userId, username, email, phoneNumber, role } = req.body;
+
+    // Find the user by ID
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
     }
-    res
-      .status(200)
-      .json({ message: "Store updated successfully", store: updatedStore });
+
+    // Update user fields
+    user.username = username || user.username;
+    user.email = email || user.email;
+    user.phoneNumber = phoneNumber || user.phoneNumber;
+    user.role = role || user.role;
+    // Handle profile picture upload
+    if (req.file) {
+      const fileBuffer = req.file.buffer; // Access the file buffer from memory
+      const fileFormat = req.file.mimetype.split("/")[1]; // Get the file format (e.g., 'jpg', 'png')
+      // Upload the image to Cloudinary
+      const cloudinaryResponse = await uploadToCloudinary(
+        fileBuffer,
+        fileFormat
+      );
+      if (!cloudinaryResponse) {
+        return res
+          .status(500)
+          .json({ message: "Error uploading profile picture" });
+      }
+
+      // Save the Cloudinary URL to the user's profile
+      user.profilePic = cloudinaryResponse.secure_url;
+    }
+
+    // Save the updated user
+    await user.save();
+
+    res.status(200).json({
+      message: "Profile updated successfully",
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        phoneNumber: user.phoneNumber,
+        role: user.role,
+        profilePic: user.profilePic,
+      },
+    });
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
   }
