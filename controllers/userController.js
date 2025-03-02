@@ -3,6 +3,8 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const Store = require("../models/storeSchema");
 const uploadToCloudinary = require("../middlewares/uploadToCloudinary");
+const Asset = require("../models/Asset");
+const Gig = require("../models/gigSchema");
 
 // @desc    Sign up a user
 // @route   POST /api/users/signup
@@ -274,6 +276,339 @@ exports.updateUserProfile = async (req, res) => {
       },
     });
   } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+exports.createAsset = async (req, res) => {
+  try {
+    const {
+      storeId,
+      type,
+      category,
+      youtubeLink,
+      productName,
+      price,
+      discount,
+      fileSize,
+      latestVersion,
+      description,
+      keywords,
+    } = req.body;
+    console.log(req.body);
+    // Validate storeId
+    const store = await Store.findById(storeId);
+    if (!store) {
+      return res.status(404).json({ message: "Store not found" });
+    }
+
+    // Validate type
+    if (!["Gig", "Game", "Asset"].includes(type)) {
+      return res.status(400).json({ message: "Invalid type" });
+    }
+
+    // Get uploaded image URLs
+    const imageUrls = [];
+    if (req.files.images) {
+      for (const image of req.files.images) {
+        const result = await uploadToCloudinary(
+          image.buffer,
+          image.originalname.split(".").pop()
+        );
+        imageUrls.push(result.secure_url);
+      }
+    }
+
+    // Get uploaded ZIP file URL
+    let zipFileUrl = null;
+    if (req.files.zipFile) {
+      const zipFile = req.files.zipFile[0];
+      const result = await uploadToCloudinary(
+        zipFile.buffer,
+        zipFile.originalname.split(".").pop()
+      );
+      zipFileUrl = result.secure_url;
+    }
+
+    if (!zipFileUrl) {
+      return res.status(400).json({ message: "ZIP file is required" });
+    }
+
+    // Create new asset
+    const newAsset = new Asset({
+      store: storeId,
+      type,
+      category,
+      youtubeLink,
+      productName,
+      price,
+      discount,
+      fileSize,
+      latestVersion,
+      description,
+      keywords: keywords.split(",").map((kw) => kw.trim()), // Convert comma-separated string to array
+      images: imageUrls,
+      zipFile: zipFileUrl,
+    });
+
+    await newAsset.save();
+
+    res
+      .status(201)
+      .json({ message: "Asset created successfully", asset: newAsset });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+exports.getAssetsByStoreId = async (req, res) => {
+  try {
+    const { storeId } = req.params;
+    // Find assets owned by the store
+    const assets = await Asset.find({ store: storeId }).select(
+      "images productName store ratingAverage totalRating type price discount"
+    );
+
+    if (!assets || assets.length === 0) {
+      return res
+        .status(404)
+        .json({ message: "No assets found for this store." });
+    }
+    const assetsWithStore = await Promise.all(
+      assets.map(async (asset) => {
+        const store = await Store.findById(asset.store); // Fetch store details using the store ID
+        return {
+          ...asset.toObject(), // Convert Mongoose document to a plain JavaScript object
+          store: store || null, // Attach the store details (or null if store not found)
+        };
+      })
+    );
+    res.status(200).json({ assets: assetsWithStore });
+  } catch (error) {
+    console.error("Error fetching store assets:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+exports.getAllAssets = async (req, res) => {
+  try {
+    // Find all assets
+    const assets = await Asset.find().select(
+      "images productName store ratingAverage totalRating type price discount"
+    );
+
+    if (!assets || assets.length === 0) {
+      return res.status(404).json({ message: "No assets found." });
+    }
+
+    // Fetch store details for each asset
+    const assetsWithStore = await Promise.all(
+      assets.map(async (asset) => {
+        const store = await Store.findById(asset.store); // Fetch store details using the store ID
+        return {
+          ...asset.toObject(), // Convert Mongoose document to a plain JavaScript object
+          store: store || null, // Attach the store details (or null if store not found)
+        };
+      })
+    );
+
+    res.status(200).json({ assets: assetsWithStore });
+  } catch (error) {
+    console.error("Error fetching all assets:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+exports.getAssetDetails = async (req, res) => {
+  try {
+    const { assetId } = req.params;
+
+    // Find the asset by ID
+    const asset = await Asset.findById(assetId);
+
+    if (!asset) {
+      return res.status(404).json({ message: "Asset not found." });
+    }
+    const store = await Store.findById(asset.store);
+    res.status(200).json({
+      ...asset.toObject(), // Convert Mongoose document to a plain JavaScript object
+      store: store || null,
+    });
+  } catch (error) {
+    console.error("Error fetching asset details:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+exports.createGig = async (req, res) => {
+  try {
+    const {
+      storeId,
+      type,
+      category,
+      youtubeLink,
+      productName,
+      description,
+      packages, // Expecting JSON string or array of { name, price, services }
+      keywords,
+    } = req.body;
+
+    console.log(req.body);
+
+    // Validate storeId
+    const store = await Store.findById(storeId);
+    if (!store) {
+      return res.status(404).json({ message: "Store not found" });
+    }
+
+    // Validate type
+    if (!["Gig", "Game", "Asset"].includes(type)) {
+      return res.status(400).json({ message: "Invalid type" });
+    }
+
+    // Validate packages (ensure it's an array with 3 valid packages)
+    let parsedPackages;
+    try {
+      parsedPackages =
+        typeof packages === "string" ? JSON.parse(packages) : packages;
+      if (!Array.isArray(parsedPackages) || parsedPackages.length !== 3) {
+        return res.status(400).json({
+          message: "Exactly 3 packages (Basic, Standard, Premium) are required",
+        });
+      }
+      const validPackageNames = ["Basic", "Standard", "Premium"];
+      for (const pkg of parsedPackages) {
+        if (
+          !validPackageNames.includes(pkg.name) ||
+          !pkg.price ||
+          !pkg.services
+        ) {
+          return res.status(400).json({
+            message:
+              "Each package must have a valid name (Basic, Standard, Premium), price, and services",
+          });
+        }
+      }
+    } catch (error) {
+      return res.status(400).json({ message: "Invalid packages format" });
+    }
+
+    // Get uploaded image URLs
+    const imageUrls = [];
+    if (req.files && req.files.images) {
+      for (const image of req.files.images) {
+        const result = await uploadToCloudinary(
+          image.buffer,
+          image.originalname.split(".").pop()
+        );
+        imageUrls.push(result.secure_url);
+      }
+    }
+
+    if (imageUrls.length === 0) {
+      return res
+        .status(400)
+        .json({ message: "At least one image is required" });
+    }
+
+    // Create new gig
+    const newGig = new Gig({
+      store: storeId,
+      type,
+      category,
+      youtubeLink,
+      productName,
+      description: description, // Placeholder description
+      packages: parsedPackages,
+      keywords: keywords.split(",").map((kw) => kw.trim()), // Convert comma-separated string to array
+      images: imageUrls,
+    });
+
+    await newGig.save();
+
+    res.status(201).json({ message: "Gig created successfully", gig: newGig });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+exports.getGigsByStoreId = async (req, res) => {
+  try {
+    const { storeId } = req.params;
+
+    // Find gigs owned by the store
+    const gigs = await Gig.find({ store: storeId }).select(
+      "images productName store type packages category"
+    );
+
+    if (!gigs || gigs.length === 0) {
+      return res.status(404).json({ message: "No gigs found for this store." });
+    }
+
+    const gigsWithStore = await Promise.all(
+      gigs.map(async (gig) => {
+        const store = await Store.findById(gig.store); // Fetch store details using the store ID
+        return {
+          ...gig.toObject(), // Convert Mongoose document to a plain JavaScript object
+          store: store || null, // Attach the store details (or null if store not found)
+        };
+      })
+    );
+
+    res.status(200).json({ gigs: gigsWithStore });
+  } catch (error) {
+    console.error("Error fetching store gigs:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+exports.getAllGigs = async (req, res) => {
+  try {
+    // Find all gigs
+    const gigs = await Gig.find().select(
+      "images productName store type packages category"
+    );
+
+    if (!gigs || gigs.length === 0) {
+      return res.status(404).json({ message: "No gigs found." });
+    }
+
+    // Fetch store details for each gig
+    const gigsWithStore = await Promise.all(
+      gigs.map(async (gig) => {
+        const store = await Store.findById(gig.store); // Fetch store details using the store ID
+        return {
+          ...gig.toObject(), // Convert Mongoose document to a plain JavaScript object
+          store: store || null, // Attach the store details (or null if store not found)
+        };
+      })
+    );
+
+    res.status(200).json({ gigs: gigsWithStore });
+  } catch (error) {
+    console.error("Error fetching all gigs:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+exports.getGigDetails = async (req, res) => {
+  try {
+    const { gigId } = req.params;
+
+    // Find the gig by ID
+    const gig = await Gig.findById(gigId);
+
+    if (!gig) {
+      return res.status(404).json({ message: "Gig not found." });
+    }
+
+    const store = await Store.findById(gig.store);
+    res.status(200).json({
+      ...gig.toObject(), // Convert Mongoose document to a plain JavaScript object
+      store: store || null,
+    });
+  } catch (error) {
+    console.error("Error fetching gig details:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
