@@ -5,6 +5,7 @@ const Store = require("../models/storeSchema");
 const uploadToCloudinary = require("../middlewares/uploadToCloudinary");
 const Asset = require("../models/Asset");
 const Gig = require("../models/gigSchema");
+const Cart = require("../models/Cart");
 
 // @desc    Sign up a user
 // @route   POST /api/users/signup
@@ -609,6 +610,101 @@ exports.getGigDetails = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching gig details:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+exports.addToCart = async (req, res) => {
+  try {
+    const { userId, itemId, type } = req.body;
+
+    if (!userId || !itemId || !type) {
+      return res
+        .status(400)
+        .json({ message: "User ID, Item ID, and Type are required" });
+    }
+    if (!["Asset", "Gig"].includes(type)) {
+      return res
+        .status(400)
+        .json({ message: "Invalid item type. Must be 'Asset' or 'Gig'" });
+    }
+
+    let cart = await Cart.findOne({ user: userId });
+    if (!cart) {
+      cart = new Cart({ user: userId, items: [] });
+    }
+
+    const existingItemIndex = cart.items.findIndex(
+      (item) => item.itemId.toString() === itemId && item.type === type
+    );
+
+    if (existingItemIndex !== -1) {
+      return res.status(400).json({ message: "Item already in cart" });
+    }
+
+    cart.items.push({ itemId, type });
+    await cart.save();
+
+    res.status(200).json({ message: "Item added to cart successfully", cart });
+  } catch (error) {
+    console.error("Error adding to cart:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+exports.getCart = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    // Fetch the cart with populated items
+    const cart = await Cart.findOne({ user: userId }).populate([
+      {
+        path: "items.itemId",
+        model: Asset, // Populate Assets
+        select: "images productName store price discount",
+        populate: { path: "store", select: "name" },
+      },
+    ]);
+
+    if (!cart) {
+      return res
+        .status(200)
+        .json({ message: "Cart is empty", cart: { items: [] } });
+    }
+
+    // Filter out null populated items (where type didn't match)
+    cart.items = cart.items.filter((item) => item.itemId !== null);
+
+    res.status(200).json({ message: "Cart retrieved successfully", cart });
+  } catch (error) {
+    console.error("Error fetching cart:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+exports.removeFromCart = async (req, res) => {
+  try {
+    const { userId, itemId, type } = req.body;
+
+    if (!userId || !itemId || !type) {
+      return res
+        .status(400)
+        .json({ message: "User ID, Item ID, and Type are required" });
+    }
+
+    const cart = await Cart.findOne({ user: userId });
+    if (!cart) {
+      return res.status(404).json({ message: "Cart not found" });
+    }
+
+    cart.items = cart.items.filter(
+      (item) => !(item.itemId.toString() === itemId && item.type === type)
+    );
+    await cart.save();
+
+    res.status(200).json({ message: "Item removed from cart", cart });
+  } catch (error) {
+    console.error("Error removing from cart:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };

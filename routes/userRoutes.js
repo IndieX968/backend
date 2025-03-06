@@ -14,6 +14,10 @@ const {
   getGigDetails,
   getAllGigs,
   getGigsByStoreId,
+  addToCart,
+  removeFromCart,
+  updateCartQuantity,
+  getCart,
 } = require("../controllers/userController");
 const tokenValidator = require("../middlewares/errorHandler");
 const upload = require("../middlewares/multer");
@@ -64,4 +68,7 @@ router.get("/get-stores-gigs/:storeId", tokenValidator, getGigsByStoreId);
 router.get("/gigs", getAllGigs);
 router.get("/get-gig-detail/:gigId", getGigDetails);
 
+router.post("/add-to-cart", tokenValidator, addToCart);
+router.post("/remove-from-cart", tokenValidator, removeFromCart);
+router.get("/get-cart/:userId", tokenValidator, getCart);
 module.exports = router;
