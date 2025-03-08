@@ -6,7 +6,7 @@ const uploadToCloudinary = require("../middlewares/uploadToCloudinary");
 const Asset = require("../models/Asset");
 const Gig = require("../models/gigSchema");
 const Cart = require("../models/Cart");
-
+const Game = require("../models/Game");
 // @desc    Sign up a user
 // @route   POST /api/users/signup
 // @access  Public
@@ -623,10 +623,10 @@ exports.addToCart = async (req, res) => {
         .status(400)
         .json({ message: "User ID, Item ID, and Type are required" });
     }
-    if (!["Asset", "Gig"].includes(type)) {
+    if (!["Asset", "Game"].includes(type)) {
       return res
         .status(400)
-        .json({ message: "Invalid item type. Must be 'Asset' or 'Gig'" });
+        .json({ message: "Invalid item type. Must be 'Asset' or 'Game'" });
     }
 
     let cart = await Cart.findOne({ user: userId });
@@ -656,26 +656,53 @@ exports.getCart = async (req, res) => {
   try {
     const { userId } = req.params;
 
-    // Fetch the cart with populated items
-    const cart = await Cart.findOne({ user: userId }).populate([
-      {
-        path: "items.itemId",
-        model: Asset, // Populate Assets
-        select: "images productName store price discount",
-        populate: { path: "store", select: "name" },
-      },
-    ]);
+    // Fetch the cart without initial population
+    const cart = await Cart.findOne({ user: userId });
 
-    if (!cart) {
+    if (!cart || cart.items.length === 0) {
       return res
         .status(200)
         .json({ message: "Cart is empty", cart: { items: [] } });
     }
 
-    // Filter out null populated items (where type didn't match)
-    cart.items = cart.items.filter((item) => item.itemId !== null);
+    // Manually populate items based on their type
+    const populatedItems = await Promise.all(
+      cart.items.map(async (cartItem) => {
+        let item;
+        if (cartItem.type === "Asset") {
+          item = await Asset.findById(cartItem.itemId)
+            .select("images productName store price discount")
+            .populate("store", "name");
+        } else if (cartItem.type === "Game") {
+          item = await Game.findById(cartItem.itemId)
+            .select("images productName store price discount")
+            .populate("store", "name");
+        }
 
-    res.status(200).json({ message: "Cart retrieved successfully", cart });
+        // Return the populated item with quantity and type
+        return item
+          ? {
+              itemId: item,
+              quantity: cartItem.quantity,
+              type: cartItem.type,
+            }
+          : null;
+      })
+    );
+
+    // Filter out null items (e.g., if item was deleted or type is invalid)
+    const filteredItems = populatedItems.filter((item) => item !== null);
+
+    // Construct the response cart object
+    const populatedCart = {
+      ...cart.toObject(),
+      items: filteredItems,
+    };
+
+    res.status(200).json({
+      message: "Cart retrieved successfully",
+      cart: populatedCart,
+    });
   } catch (error) {
     console.error("Error fetching cart:", error);
     res.status(500).json({ message: "Server error", error: error.message });
@@ -705,6 +732,194 @@ exports.removeFromCart = async (req, res) => {
     res.status(200).json({ message: "Item removed from cart", cart });
   } catch (error) {
     console.error("Error removing from cart:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+exports.createGame = async (req, res) => {
+  try {
+    const {
+      storeId,
+      type,
+      category,
+      youtubeLink,
+      productName,
+      price,
+      discount,
+      fileSize,
+      latestVersion,
+      description,
+      technicalDetail,
+      keywords,
+      earlyAccess,
+      platform,
+      mobileType,
+    } = req.body;
+
+    console.log(req.body);
+
+    // Validate storeId
+    const store = await Store.findById(storeId);
+    if (!store) {
+      return res.status(404).json({ message: "Store not found" });
+    }
+
+    // Validate type
+    if (!["Gig", "Game", "Asset"].includes(type)) {
+      return res.status(400).json({ message: "Invalid type" });
+    }
+
+    // Validate platform
+    if (!["Mobile", "Desktop", "WebGL"].includes(platform)) {
+      return res.status(400).json({ message: "Invalid platform" });
+    }
+
+    // Validate mobileType if platform is Mobile
+    if (
+      platform === "Mobile" &&
+      !["iOS", "Android", "Both"].includes(mobileType)
+    ) {
+      return res.status(400).json({ message: "Invalid mobile type" });
+    }
+
+    // Get uploaded image URLs
+    const imageUrls = [];
+    if (req.files && req.files.images) {
+      for (const image of req.files.images) {
+        const result = await uploadToCloudinary(
+          image.buffer,
+          image.originalname.split(".").pop()
+        );
+        imageUrls.push(result.secure_url);
+      }
+    }
+
+    if (imageUrls.length === 0) {
+      return res
+        .status(400)
+        .json({ message: "At least one image is required" });
+    }
+
+    // Get uploaded WebGL demo ZIP file URL (optional)
+    let webglDemoZipUrl = null;
+    if (platform === "WebGL" && req.files && req.files.webglDemoZip) {
+      const zipFile = req.files.webglDemoZip[0];
+      const result = await uploadToCloudinary(
+        zipFile.buffer,
+        zipFile.originalname.split(".").pop()
+      );
+      webglDemoZipUrl = result.secure_url;
+    }
+
+    // Create new game
+    const newGame = new Game({
+      store: storeId,
+      type,
+      category,
+      youtubeLink,
+      productName,
+      price,
+      discount,
+      fileSize,
+      latestVersion,
+      description,
+      technicalDetail,
+      keywords: keywords.split(",").map((kw) => kw.trim()), // Convert comma-separated string to array
+      earlyAccess: earlyAccess === "true" || earlyAccess === true, // Handle string "true" from form
+      platform,
+      mobileType: platform === "Mobile" ? mobileType : undefined,
+      images: imageUrls,
+      webglDemoZip: webglDemoZipUrl,
+    });
+
+    await newGame.save();
+
+    res
+      .status(201)
+      .json({ message: "Game created successfully", game: newGame });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+exports.getGamesByStoreId = async (req, res) => {
+  try {
+    const { storeId } = req.params;
+    // Find games owned by the store
+    const games = await Game.find({ store: storeId }).select(
+      "images productName store ratingAverage totalRating type price discount"
+    );
+
+    if (!games || games.length === 0) {
+      return res
+        .status(404)
+        .json({ message: "No games found for this store." });
+    }
+
+    const gamesWithStore = await Promise.all(
+      games.map(async (game) => {
+        const store = await Store.findById(game.store);
+        return {
+          ...game.toObject(),
+          store: store || null,
+        };
+      })
+    );
+
+    res.status(200).json({ games: gamesWithStore });
+  } catch (error) {
+    console.error("Error fetching store games:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+exports.getAllGames = async (req, res) => {
+  try {
+    // Find all games
+    const games = await Game.find().select(
+      "images productName store ratingAverage totalRating type price discount"
+    );
+
+    if (!games || games.length === 0) {
+      return res.status(404).json({ message: "No games found." });
+    }
+
+    const gamesWithStore = await Promise.all(
+      games.map(async (game) => {
+        const store = await Store.findById(game.store);
+        return {
+          ...game.toObject(),
+          store: store || null,
+        };
+      })
+    );
+
+    res.status(200).json({ games: gamesWithStore });
+  } catch (error) {
+    console.error("Error fetching all games:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+exports.getGameDetails = async (req, res) => {
+  try {
+    const { gameId } = req.params;
+
+    // Find the game by ID
+    const game = await Game.findById(gameId);
+
+    if (!game) {
+      return res.status(404).json({ message: "Game not found." });
+    }
+
+    const store = await Store.findById(game.store);
+    res.status(200).json({
+      ...game.toObject(),
+      store: store || null,
+    });
+  } catch (error) {
+    console.error("Error fetching game details:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };

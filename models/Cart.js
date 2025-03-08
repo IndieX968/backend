@@ -9,7 +9,7 @@ const cartItemSchema = new mongoose.Schema({
   type: {
     type: String,
     required: [true, "Item type is required"],
-    enum: ["Asset", "Gig"],
+    enum: ["Asset", "Game"],
   },
   addedAt: {
     type: Date,
