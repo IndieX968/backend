@@ -56,7 +56,7 @@ router.post(
   createAsset
 );
 
-router.get("/get-stores-assets/:storeId", tokenValidator, getAssetsByStoreId);
+router.get("/get-stores-assets/:storeId", getAssetsByStoreId);
 
 router.get("/assets", getAllAssets);
 router.get("/get-asset-detail/:assetId", getAssetDetails);
@@ -68,7 +68,7 @@ router.post(
   createGig
 );
 
-router.get("/get-stores-gigs/:storeId", tokenValidator, getGigsByStoreId);
+router.get("/get-stores-gigs/:storeId", getGigsByStoreId);
 router.get("/gigs", getAllGigs);
 router.get("/get-gig-detail/:gigId", getGigDetails);
 
@@ -85,7 +85,7 @@ router.post(
   ]),
   createGame
 );
-router.get("/get-stores-games/:storeId", tokenValidator, getGamesByStoreId);
+router.get("/get-stores-games/:storeId", getGamesByStoreId);
 router.get("/games", getAllGames);
 router.get("/get-game-detail/:gameId", getGameDetails);
 
