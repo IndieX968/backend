@@ -16,12 +16,19 @@ const {
   getGigsByStoreId,
   addToCart,
   removeFromCart,
-  updateCartQuantity,
   getCart,
   getGameDetails,
   getAllGames,
   getGamesByStoreId,
   createGame,
+  getItemsByType,
+  getItemsByTypeAndCategory,
+  getReviews,
+  createReview,
+  sendMessage,
+  getChatHistory,
+  getUserChatList,
+  search,
 } = require("../controllers/userController");
 const tokenValidator = require("../middlewares/errorHandler");
 const upload = require("../middlewares/multer");
@@ -88,5 +95,16 @@ router.post(
 router.get("/get-stores-games/:storeId", getGamesByStoreId);
 router.get("/games", getAllGames);
 router.get("/get-game-detail/:gameId", getGameDetails);
+
+router.get("/categories/:type", getItemsByType);
+router.get("/categories/:type/:category", getItemsByTypeAndCategory);
+
+router.get("/reviews/:itemType/:itemId", getReviews);
+router.post("/reviews/", tokenValidator, createReview);
+
+router.post("/chats", tokenValidator, sendMessage);
+router.get("/chats/:chatId", tokenValidator, getChatHistory);
+router.get("/chats", tokenValidator, getUserChatList);
+router.get("/search", search);
 
 module.exports = router;

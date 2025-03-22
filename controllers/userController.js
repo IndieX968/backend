@@ -7,6 +7,10 @@ const Asset = require("../models/Asset");
 const Gig = require("../models/gigSchema");
 const Cart = require("../models/Cart");
 const Game = require("../models/Game");
+const Review = require("../models/Review");
+const mongoose = require("mongoose");
+const Message = require("../models/Message");
+const Chat = require("../models/Chat");
 // @desc    Sign up a user
 // @route   POST /api/users/signup
 // @access  Public
@@ -368,7 +372,7 @@ exports.getAssetsByStoreId = async (req, res) => {
     const { storeId } = req.params;
     // Find assets owned by the store
     const assets = await Asset.find({ store: storeId }).select(
-      "images productName store ratingAverage totalRating type price discount"
+      "images productName store type price discount"
     );
 
     if (!assets || assets.length === 0) {
@@ -376,51 +380,101 @@ exports.getAssetsByStoreId = async (req, res) => {
         .status(404)
         .json({ message: "No assets found for this store." });
     }
-    const assetsWithStore = await Promise.all(
+
+    // Fetch store details and calculate rating stats for each asset
+    const assetsWithStoreAndRatings = await Promise.all(
       assets.map(async (asset) => {
-        const store = await Store.findById(asset.store); // Fetch store details using the store ID
+        const store = await Store.findById(asset.store); // Fetch store details
+
+        // Calculate rating stats from reviews
+        const ratingStats = await Review.aggregate([
+          {
+            $match: {
+              itemId: new mongoose.Types.ObjectId(asset._id), // Match reviews for this asset
+              itemType: "asset",
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              ratingAverage: { $avg: "$rating" }, // Average rating out of 5
+              totalRating: { $sum: 1 }, // Total number of ratings
+            },
+          },
+        ]);
+
+        const ratingAverage =
+          ratingStats.length > 0 ? ratingStats[0].ratingAverage : 0;
+        const totalRating =
+          ratingStats.length > 0 ? ratingStats[0].totalRating : 0;
+
         return {
-          ...asset.toObject(), // Convert Mongoose document to a plain JavaScript object
-          store: store || null, // Attach the store details (or null if store not found)
+          ...asset.toObject(), // Convert Mongoose document to plain JS object
+          store: store || null, // Attach store details (or null if not found)
+          ratingAverage: parseFloat(ratingAverage.toFixed(1)), // Average rating out of 5
+          totalRating, // Total number of ratings
         };
       })
     );
-    res.status(200).json({ assets: assetsWithStore });
+
+    res.status(200).json({ assets: assetsWithStoreAndRatings });
   } catch (error) {
     console.error("Error fetching store assets:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
-
 exports.getAllAssets = async (req, res) => {
   try {
     // Find all assets
     const assets = await Asset.find().select(
-      "images productName store ratingAverage totalRating type price discount"
+      "images productName store type price discount"
     );
 
     if (!assets || assets.length === 0) {
       return res.status(404).json({ message: "No assets found." });
     }
 
-    // Fetch store details for each asset
-    const assetsWithStore = await Promise.all(
+    // Fetch store details and calculate rating stats for each asset
+    const assetsWithStoreAndRatings = await Promise.all(
       assets.map(async (asset) => {
-        const store = await Store.findById(asset.store); // Fetch store details using the store ID
+        const store = await Store.findById(asset.store); // Fetch store details
+
+        // Calculate rating stats from reviews
+        const ratingStats = await Review.aggregate([
+          {
+            $match: {
+              itemId: new mongoose.Types.ObjectId(asset._id), // Match reviews for this asset
+              itemType: "asset",
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              ratingAverage: { $avg: "$rating" }, // Average rating out of 5
+              totalRating: { $sum: 1 }, // Total number of ratings
+            },
+          },
+        ]);
+
+        const ratingAverage =
+          ratingStats.length > 0 ? ratingStats[0].ratingAverage : 0;
+        const totalRating =
+          ratingStats.length > 0 ? ratingStats[0].totalRating : 0;
         return {
-          ...asset.toObject(), // Convert Mongoose document to a plain JavaScript object
-          store: store || null, // Attach the store details (or null if store not found)
+          ...asset.toObject(), // Convert Mongoose document to plain JS object
+          store: store || null, // Attach store details (or null if not found)
+          ratingAverage: parseFloat(ratingAverage.toFixed(1)), // Average rating out of 5
+          totalRating, // Total number of ratings
         };
       })
     );
 
-    res.status(200).json({ assets: assetsWithStore });
+    res.status(200).json({ assets: assetsWithStoreAndRatings });
   } catch (error) {
     console.error("Error fetching all assets:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
-
 exports.getAssetDetails = async (req, res) => {
   try {
     const { assetId } = req.params;
@@ -431,10 +485,37 @@ exports.getAssetDetails = async (req, res) => {
     if (!asset) {
       return res.status(404).json({ message: "Asset not found." });
     }
+
+    // Fetch store details
     const store = await Store.findById(asset.store);
+
+    // Calculate rating stats from reviews
+    const ratingStats = await Review.aggregate([
+      {
+        $match: {
+          itemId: new mongoose.Types.ObjectId(assetId), // Match reviews for this asset
+          itemType: "asset",
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          ratingAverage: { $avg: "$rating" }, // Average rating out of 5
+          totalRating: { $sum: 1 }, // Total number of ratings
+        },
+      },
+    ]);
+
+    const ratingAverage =
+      ratingStats.length > 0 ? ratingStats[0].ratingAverage : 0;
+    const totalRating = ratingStats.length > 0 ? ratingStats[0].totalRating : 0;
+
+    // Return asset details with store and calculated ratings
     res.status(200).json({
-      ...asset.toObject(), // Convert Mongoose document to a plain JavaScript object
-      store: store || null,
+      ...asset.toObject(), // Convert Mongoose document to plain JS object
+      store: store || null, // Attach store details (or null if not found)
+      ratingAverage: parseFloat(ratingAverage.toFixed(1)), // Average rating out of 5
+      totalRating, // Total number of ratings
     });
   } catch (error) {
     console.error("Error fetching asset details:", error);
@@ -548,22 +629,49 @@ exports.getGigsByStoreId = async (req, res) => {
       return res.status(404).json({ message: "No gigs found for this store." });
     }
 
-    const gigsWithStore = await Promise.all(
+    // Fetch store details and calculate rating stats for each gig
+    const gigsWithStoreAndRatings = await Promise.all(
       gigs.map(async (gig) => {
-        const store = await Store.findById(gig.store); // Fetch store details using the store ID
+        const store = await Store.findById(gig.store); // Fetch store details
+
+        // Calculate rating stats from reviews
+        const ratingStats = await Review.aggregate([
+          {
+            $match: {
+              itemId: new mongoose.Types.ObjectId(gig._id), // Match reviews for this gig
+              itemType: "gig",
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              ratingAverage: { $avg: "$rating" }, // Average rating out of 5
+              totalRating: { $sum: 1 }, // Total number of ratings
+            },
+          },
+        ]);
+
+        const ratingAverage =
+          ratingStats.length > 0 ? ratingStats[0].ratingAverage : 0;
+        const totalRating =
+          ratingStats.length > 0 ? ratingStats[0].totalRating : 0;
+
         return {
-          ...gig.toObject(), // Convert Mongoose document to a plain JavaScript object
-          store: store || null, // Attach the store details (or null if store not found)
+          ...gig.toObject(), // Convert Mongoose document to plain JS object
+          store: store || null, // Attach store details (or null if not found)
+          ratingAverage: parseFloat(ratingAverage.toFixed(1)), // Average rating out of 5
+          totalRating, // Total number of ratings
         };
       })
     );
 
-    res.status(200).json({ gigs: gigsWithStore });
+    res.status(200).json({ gigs: gigsWithStoreAndRatings });
   } catch (error) {
     console.error("Error fetching store gigs:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
+
 exports.getAllGigs = async (req, res) => {
   try {
     // Find all gigs
@@ -575,18 +683,43 @@ exports.getAllGigs = async (req, res) => {
       return res.status(404).json({ message: "No gigs found." });
     }
 
-    // Fetch store details for each gig
-    const gigsWithStore = await Promise.all(
+    // Fetch store details and calculate rating stats for each gig
+    const gigsWithStoreAndRatings = await Promise.all(
       gigs.map(async (gig) => {
-        const store = await Store.findById(gig.store); // Fetch store details using the store ID
+        const store = await Store.findById(gig.store); // Fetch store details
+
+        // Calculate rating stats from reviews
+        const ratingStats = await Review.aggregate([
+          {
+            $match: {
+              itemId: new mongoose.Types.ObjectId(gig._id), // Match reviews for this gig
+              itemType: "gig",
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              ratingAverage: { $avg: "$rating" }, // Average rating out of 5
+              totalRating: { $sum: 1 }, // Total number of ratings
+            },
+          },
+        ]);
+
+        const ratingAverage =
+          ratingStats.length > 0 ? ratingStats[0].ratingAverage : 0;
+        const totalRating =
+          ratingStats.length > 0 ? ratingStats[0].totalRating : 0;
+
         return {
-          ...gig.toObject(), // Convert Mongoose document to a plain JavaScript object
-          store: store || null, // Attach the store details (or null if store not found)
+          ...gig.toObject(), // Convert Mongoose document to plain JS object
+          store: store || null, // Attach store details (or null if not found)
+          ratingAverage: parseFloat(ratingAverage.toFixed(1)), // Average rating out of 5
+          totalRating, // Total number of ratings
         };
       })
     );
 
-    res.status(200).json({ gigs: gigsWithStore });
+    res.status(200).json({ gigs: gigsWithStoreAndRatings });
   } catch (error) {
     console.error("Error fetching all gigs:", error);
     res.status(500).json({ message: "Server error", error: error.message });
@@ -603,10 +736,36 @@ exports.getGigDetails = async (req, res) => {
       return res.status(404).json({ message: "Gig not found." });
     }
 
+    // Fetch store details
     const store = await Store.findById(gig.store);
+
+    // Calculate rating stats from reviews
+    const ratingStats = await Review.aggregate([
+      {
+        $match: {
+          itemId: new mongoose.Types.ObjectId(gigId), // Match reviews for this gig
+          itemType: "gig",
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          ratingAverage: { $avg: "$rating" }, // Average rating out of 5
+          totalRating: { $sum: 1 }, // Total number of ratings
+        },
+      },
+    ]);
+
+    const ratingAverage =
+      ratingStats.length > 0 ? ratingStats[0].ratingAverage : 0;
+    const totalRating = ratingStats.length > 0 ? ratingStats[0].totalRating : 0;
+
+    // Return gig details with store and calculated ratings
     res.status(200).json({
-      ...gig.toObject(), // Convert Mongoose document to a plain JavaScript object
-      store: store || null,
+      ...gig.toObject(), // Convert Mongoose document to plain JS object
+      store: store || null, // Attach store details (or null if not found)
+      ratingAverage: parseFloat(ratingAverage.toFixed(1)), // Average rating out of 5
+      totalRating, // Total number of ratings
     });
   } catch (error) {
     console.error("Error fetching gig details:", error);
@@ -846,9 +1005,10 @@ exports.createGame = async (req, res) => {
 exports.getGamesByStoreId = async (req, res) => {
   try {
     const { storeId } = req.params;
+
     // Find games owned by the store
     const games = await Game.find({ store: storeId }).select(
-      "images productName store ratingAverage totalRating type price discount"
+      "images productName store type price discount"
     );
 
     if (!games || games.length === 0) {
@@ -857,17 +1017,43 @@ exports.getGamesByStoreId = async (req, res) => {
         .json({ message: "No games found for this store." });
     }
 
-    const gamesWithStore = await Promise.all(
+    // Fetch store details and calculate rating stats for each game
+    const gamesWithStoreAndRatings = await Promise.all(
       games.map(async (game) => {
-        const store = await Store.findById(game.store);
+        const store = await Store.findById(game.store); // Fetch store details
+
+        // Calculate rating stats from reviews
+        const ratingStats = await Review.aggregate([
+          {
+            $match: {
+              itemId: new mongoose.Types.ObjectId(game._id), // Match reviews for this game
+              itemType: "game",
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              ratingAverage: { $avg: "$rating" }, // Average rating out of 5
+              totalRating: { $sum: 1 }, // Total number of ratings
+            },
+          },
+        ]);
+
+        const ratingAverage =
+          ratingStats.length > 0 ? ratingStats[0].ratingAverage : 0;
+        const totalRating =
+          ratingStats.length > 0 ? ratingStats[0].totalRating : 0;
+
         return {
-          ...game.toObject(),
-          store: store || null,
+          ...game.toObject(), // Convert Mongoose document to plain JS object
+          store: store || null, // Attach store details (or null if not found)
+          ratingAverage: parseFloat(ratingAverage.toFixed(1)), // Average rating out of 5
+          totalRating, // Total number of ratings
         };
       })
     );
 
-    res.status(200).json({ games: gamesWithStore });
+    res.status(200).json({ games: gamesWithStoreAndRatings });
   } catch (error) {
     console.error("Error fetching store games:", error);
     res.status(500).json({ message: "Server error", error: error.message });
@@ -878,24 +1064,50 @@ exports.getAllGames = async (req, res) => {
   try {
     // Find all games
     const games = await Game.find().select(
-      "images productName store ratingAverage totalRating type price discount"
+      "images productName store type price discount"
     );
 
     if (!games || games.length === 0) {
       return res.status(404).json({ message: "No games found." });
     }
 
-    const gamesWithStore = await Promise.all(
+    // Fetch store details and calculate rating stats for each game
+    const gamesWithStoreAndRatings = await Promise.all(
       games.map(async (game) => {
-        const store = await Store.findById(game.store);
+        const store = await Store.findById(game.store); // Fetch store details
+
+        // Calculate rating stats from reviews
+        const ratingStats = await Review.aggregate([
+          {
+            $match: {
+              itemId: new mongoose.Types.ObjectId(game._id), // Match reviews for this game
+              itemType: "game",
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              ratingAverage: { $avg: "$rating" }, // Average rating out of 5
+              totalRating: { $sum: 1 }, // Total number of ratings
+            },
+          },
+        ]);
+
+        const ratingAverage =
+          ratingStats.length > 0 ? ratingStats[0].ratingAverage : 0;
+        const totalRating =
+          ratingStats.length > 0 ? ratingStats[0].totalRating : 0;
+
         return {
-          ...game.toObject(),
-          store: store || null,
+          ...game.toObject(), // Convert Mongoose document to plain JS object
+          store: store || null, // Attach store details (or null if not found)
+          ratingAverage: parseFloat(ratingAverage.toFixed(1)), // Average rating out of 5
+          totalRating, // Total number of ratings
         };
       })
     );
 
-    res.status(200).json({ games: gamesWithStore });
+    res.status(200).json({ games: gamesWithStoreAndRatings });
   } catch (error) {
     console.error("Error fetching all games:", error);
     res.status(500).json({ message: "Server error", error: error.message });
@@ -913,13 +1125,611 @@ exports.getGameDetails = async (req, res) => {
       return res.status(404).json({ message: "Game not found." });
     }
 
+    // Fetch store details
     const store = await Store.findById(game.store);
+
+    // Calculate rating stats from reviews
+    const ratingStats = await Review.aggregate([
+      {
+        $match: {
+          itemId: new mongoose.Types.ObjectId(gameId), // Match reviews for this game
+          Frankensteined: true,
+          itemType: "game",
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          ratingAverage: { $avg: "$rating" }, // Average rating out of 5
+          totalRating: { $sum: 1 }, // Total number of ratings
+        },
+      },
+    ]);
+
+    const ratingAverage =
+      ratingStats.length > 0 ? ratingStats[0].ratingAverage : 0;
+    const totalRating = ratingStats.length > 0 ? ratingStats[0].totalRating : 0;
+
+    // Return game details with store and calculated ratings
     res.status(200).json({
-      ...game.toObject(),
-      store: store || null,
+      ...game.toObject(), // Convert Mongoose document to plain JS object
+      store: store || null, // Attach store details (or null if not found)
+      ratingAverage: parseFloat(ratingAverage.toFixed(1)), // Average rating out of 5
+      totalRating, // Total number of ratings
     });
   } catch (error) {
     console.error("Error fetching game details:", error);
     res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+exports.getItemsByTypeAndCategory = async (req, res) => {
+  try {
+    const { type, category } = req.params; // e.g., /Assets/3D Models
+    const { price, sort, page = 1, limit = 10 } = req.query; // Removed rating filter
+
+    let query = category ? { category } : {};
+    let Model;
+    let selectFields = "images productName store price discount type _id";
+    let itemType;
+
+    // Select model and adjust fields based on type
+    switch (type.toLowerCase()) {
+      case "assets":
+        Model = Asset;
+        itemType = "asset";
+        break;
+      case "gigs":
+        Model = Gig;
+        selectFields += " packages";
+        itemType = "gig";
+        break;
+      case "games":
+        Model = Game;
+        itemType = "game";
+        break;
+      default:
+        return res.status(400).json({ message: "Invalid type" });
+    }
+
+    // Price filter
+    if (price) {
+      if (price === "Free") query.price = 0;
+      else if (price === "Under £10") query.price = { $lte: 10 };
+      else if (price === "Under £20") query.price = { $lte: 20 };
+      else if (price === "Under £50") query.price = { $lte: 50 };
+    }
+
+    // Sorting (ratingAverage removed from sort options)
+    let sortOption = {};
+    if (sort === "Price: Low to High") sortOption.price = 1;
+    else if (sort === "Price: High to Low") sortOption.price = -1;
+    // Default sort by creation date or another field if rating isn’t available
+    else sortOption.createdAt = -1;
+
+    // Pagination
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Fetch items
+    const items = await Model.find(query)
+      .populate("store", "name")
+      .select(selectFields)
+      .sort(sortOption)
+      .skip(skip)
+      .limit(limitNum);
+
+    const totalItems = await Model.countDocuments(query);
+
+    // Calculate ratings for each item
+    const itemsWithRatings = await Promise.all(
+      items.map(async (item) => {
+        const ratingStats = await Review.aggregate([
+          {
+            $match: {
+              itemId: new mongoose.Types.ObjectId(item._id),
+              itemType,
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              ratingAverage: { $avg: "$rating" },
+              totalRating: { $sum: 1 },
+            },
+          },
+        ]);
+
+        const ratingAverage =
+          ratingStats.length > 0 ? ratingStats[0].ratingAverage : 0;
+        const totalRating =
+          ratingStats.length > 0 ? ratingStats[0].totalRating : 0;
+
+        return {
+          ...item.toObject(),
+          ratingAverage: parseFloat(ratingAverage.toFixed(1)),
+          totalRating,
+        };
+      })
+    );
+
+    if (!itemsWithRatings || itemsWithRatings.length === 0) {
+      return res.status(200).json({
+        message: "No items found",
+        items: [],
+        totalItems: 0,
+        currentPage: pageNum,
+        totalPages: 0,
+      });
+    }
+
+    res.status(200).json({
+      message: "Items retrieved successfully",
+      items: itemsWithRatings,
+      totalItems,
+      currentPage: pageNum,
+      totalPages: Math.ceil(totalItems / limitNum),
+    });
+  } catch (error) {
+    console.error("Error fetching items by type and category:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+// Fetch all items by type with filters, sorting, and pagination
+exports.getItemsByType = async (req, res) => {
+  try {
+    const { type } = req.params;
+    const { price, sort, page = 1, limit = 10 } = req.query; // Removed rating filter
+
+    let query = {};
+    let Model;
+    let selectFields = "images productName store price discount type _id";
+    let itemType;
+
+    // Select model and adjust fields based on type
+    switch (type.toLowerCase()) {
+      case "assets":
+        Model = Asset;
+        itemType = "asset";
+        break;
+      case "gigs":
+        Model = Gig;
+        selectFields += " packages";
+        itemType = "gig";
+        break;
+      case "games":
+        Model = Game;
+        itemType = "game";
+        break;
+      default:
+        return res.status(400).json({ message: "Invalid type" });
+    }
+
+    // Price filter
+    if (price) {
+      if (price === "Free") query.price = 0;
+      else if (price === "Under £10") query.price = { $lte: 10 };
+      else if (price === "Under £20") query.price = { $lte: 20 };
+      else if (price === "Under £50") query.price = { $lte: 50 };
+    }
+
+    // Sorting (ratingAverage removed from sort options)
+    let sortOption = {};
+    if (sort === "Price: Low to High") sortOption.price = 1;
+    else if (sort === "Price: High to Low") sortOption.price = -1;
+    // Default sort by creation date or another field if rating isn’t available
+    else sortOption.createdAt = -1;
+
+    // Pagination
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Fetch items
+    const items = await Model.find(query)
+      .populate("store", "name")
+      .select(selectFields)
+      .sort(sortOption)
+      .skip(skip)
+      .limit(limitNum);
+
+    const totalItems = await Model.countDocuments(query);
+
+    // Calculate ratings for each item
+    const itemsWithRatings = await Promise.all(
+      items.map(async (item) => {
+        const ratingStats = await Review.aggregate([
+          {
+            $match: {
+              itemId: new mongoose.Types.ObjectId(item._id),
+              itemType,
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              ratingAverage: { $avg: "$rating" },
+              totalRating: { $sum: 1 },
+            },
+          },
+        ]);
+
+        const ratingAverage =
+          ratingStats.length > 0 ? ratingStats[0].ratingAverage : 0;
+        const totalRating =
+          ratingStats.length > 0 ? ratingStats[0].totalRating : 0;
+
+        return {
+          ...item.toObject(),
+          ratingAverage: parseFloat(ratingAverage.toFixed(1)),
+          totalRating,
+        };
+      })
+    );
+
+    if (!itemsWithRatings || itemsWithRatings.length === 0) {
+      return res.status(200).json({
+        message: "No items found",
+        items: [],
+        totalItems: 0,
+        currentPage: pageNum,
+        totalPages: 0,
+      });
+    }
+
+    res.status(200).json({
+      message: "Items retrieved successfully",
+      items: itemsWithRatings,
+      totalItems,
+      currentPage: pageNum,
+      totalPages: Math.ceil(totalItems / limitNum),
+    });
+  } catch (error) {
+    console.error("Error fetching items by type:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+exports.getReviews = async (req, res) => {
+  try {
+    const { itemId, itemType } = req.params;
+    const { page = 1, limit = 10 } = req.query;
+    console.log(itemId, itemType);
+    if (!["asset", "gig", "game"].includes(itemType.toLowerCase())) {
+      return res.status(400).json({ message: "Invalid item type" });
+    }
+
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    const reviews = await Review.find({
+      itemId,
+      itemType: itemType.toLowerCase(),
+    })
+      .populate("user", "username profilePic") // Populate username
+      .sort({ createdAt: -1 }) // Newest first
+      .skip(skip)
+      .limit(limitNum);
+
+    const totalReviews = await Review.countDocuments({
+      itemId,
+      itemType: itemType.toLowerCase(),
+    });
+
+    // Calculate average rating
+    const ratingStats = await Review.aggregate([
+      {
+        $match: {
+          itemId: new mongoose.Types.ObjectId(itemId), // Use 'new' here
+          itemType: itemType.toLowerCase(),
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          avgRating: { $avg: "$rating" },
+          total: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const avgRating = ratingStats.length > 0 ? ratingStats[0].avgRating : 0;
+    const totalRating = ratingStats.length > 0 ? ratingStats[0].total : 0;
+
+    res.status(200).json({
+      message: "Reviews retrieved successfully",
+      reviews,
+      totalReviews,
+      currentPage: pageNum,
+      totalPages: Math.ceil(totalReviews / limitNum),
+      avgRating: parseFloat(avgRating.toFixed(1)),
+      totalRating,
+    });
+  } catch (error) {
+    console.error("Error fetching reviews:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+// Submit a new review
+exports.createReview = async (req, res) => {
+  try {
+    const { itemId, itemType, rating, comment } = req.body;
+    const userId = req.user.id; // Assuming auth middleware sets req.user
+
+    if (!["asset", "gig", "game"].includes(itemType.toLowerCase())) {
+      return res.status(400).json({ message: "Invalid item type" });
+    }
+
+    if (!rating || rating < 1 || rating > 5) {
+      return res
+        .status(400)
+        .json({ message: "Rating must be between 1 and 5" });
+    }
+
+    // Check if item exists
+    let Model;
+    switch (itemType.toLowerCase()) {
+      case "asset":
+        Model = Asset;
+        break;
+      case "gig":
+        Model = Gig;
+        break;
+      case "game":
+        Model = Game;
+        break;
+    }
+    const item = await Model.findById(itemId);
+    if (!item) {
+      return res.status(404).json({ message: "Item not found" });
+    }
+
+    // Check if user already reviewed this item
+    const existingReview = await Review.findOne({
+      user: userId,
+      itemId,
+      itemType: itemType.toLowerCase(),
+    });
+    if (existingReview) {
+      return res
+        .status(400)
+        .json({ message: "You have already reviewed this item" });
+    }
+
+    const review = new Review({
+      user: userId,
+      itemId,
+      itemType: itemType.toLowerCase(),
+      rating,
+      comment,
+    });
+
+    await review.save();
+
+    // Update item's rating stats
+    const ratingStats = await Review.aggregate([
+      {
+        $match: {
+          itemId: new mongoose.Types.ObjectId(itemId), // Add 'new' here
+          itemType: itemType.toLowerCase(),
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          avgRating: { $avg: "$rating" },
+          total: { $sum: 1 },
+        },
+      },
+    ]);
+
+    item.ratingAverage =
+      ratingStats.length > 0 ? ratingStats[0].avgRating : rating;
+    item.totalRating = ratingStats.length > 0 ? ratingStats[0].total : 1;
+    await item.save();
+
+    res.status(201).json({ message: "Review submitted successfully", review });
+  } catch (error) {
+    console.error("Error creating review:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+exports.sendMessage = async (req, res) => {
+  try {
+    const { gigId, content } = req.body;
+    const senderId = req.user.id; // Assuming user ID from auth middleware
+
+    // Validate input
+    if (!gigId || !content) {
+      return res
+        .status(400)
+        .json({ message: "Gig ID and message content are required." });
+    }
+
+    // Find the gig to get the store owner (receiver)
+    const gig = await Gig.findById(gigId);
+    if (!gig) {
+      return res.status(404).json({ message: "Gig not found." });
+    }
+
+    const store = await Store.findById(gig.store);
+    const receiverId = store.user; // Adjust based on your Store schema
+    if (!receiverId) {
+      return res.status(400).json({ message: "Store owner not found" });
+    }
+
+    // Prevent sending message to self
+    if (senderId === receiverId.toString()) {
+      return res
+        .status(400)
+        .json({ message: "Cannot send message to yourself." });
+    }
+
+    // Check if chat already exists
+    let chat = await Chat.findOne({ gigId, initiatorId: senderId });
+    if (!chat) {
+      // Create a new chat if it doesn't exist
+      chat = new Chat({
+        gigId,
+        initiatorId: senderId,
+        gigOwnerId: receiverId,
+      });
+      await chat.save();
+    }
+
+    // Create new message with chatId
+    const message = new Message({
+      chatId: chat._id,
+      sender: senderId,
+      receiver: receiverId,
+      content,
+    });
+
+    await message.save();
+
+    res
+      .status(201)
+      .json({ message: "Message sent successfully", data: message });
+  } catch (error) {
+    console.error("Error sending message:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+exports.getChatHistory = async (req, res) => {
+  try {
+    const { chatId } = req.params; // Changed from gigId to chatId
+    const userId = req.user.id; // Assuming user ID from auth middleware
+
+    // Find messages for the specific chatId where the user is either sender or receiver
+    const messages = await Message.find({
+      chatId,
+      $or: [{ sender: userId }, { receiver: userId }],
+    })
+      .populate("sender", "username profilePic") // Populate sender's username
+      .populate("receiver", "username profilePic") // Populate receiver's username
+      .sort({ timestamp: 1 }); // Sort by timestamp ascending
+    if (!messages || messages.length === 0) {
+      return res
+        .status(200)
+        .json({ message: "No chat history found.", messages: [] });
+    }
+
+    res.status(200).json({ messages });
+  } catch (error) {
+    console.error("Error fetching chat history:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+exports.getUserChatList = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const chatThreads = await Chat.find({
+      $or: [{ initiatorId: userId }, { gigOwnerId: userId }],
+    })
+      .populate("gigId", "productName")
+      .populate("initiatorId", "username profilePic")
+      .populate("gigOwnerId", "username profilePic")
+      .sort({ createdAt: -1 });
+
+    const threadsWithLastMessage = await Promise.all(
+      chatThreads.map(async (chat) => {
+        const lastMessage = await Message.findOne({ gigId: chat.gigId })
+          .sort({ timestamp: -1 })
+          .select("content timestamp isRead sender");
+        return {
+          gigId: chat.gigId._id,
+          gigName: chat.gigId.productName || "Unknown Gig",
+          initiator: {
+            id: chat.initiatorId._id,
+            username: chat.initiatorId.username || "Unknown User",
+            profilePic: chat.initiatorId.profilePic || "defaultImageUrl",
+          },
+          gigOwner: {
+            id: chat.gigOwnerId._id,
+            username: chat.gigOwnerId.username || "Unknown User",
+            profilePic: chat.gigOwnerId.profilePic || "defaultImageUrl",
+          },
+          lastMessage: lastMessage
+            ? {
+                content: lastMessage.content,
+                timestamp: lastMessage.timestamp,
+                isRead: lastMessage.isRead,
+                sender: lastMessage.sender,
+              }
+            : null,
+          _id: chat._id,
+        };
+      })
+    );
+
+    res.status(200).json({ threads: threadsWithLastMessage });
+  } catch (error) {
+    console.error("Error fetching chat list:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+exports.search = async (req, res) => {
+  const { q } = req.query; // Search query from frontend
+
+  if (!q || q.trim() === "") {
+    return res.status(400).json({ message: "Search query is required" });
+  }
+
+  try {
+    // Case-insensitive regex for searching
+    const searchRegex = new RegExp(q, "i");
+
+    // Search Assets
+    const assets = await Asset.find({
+      $or: [
+        { productName: searchRegex },
+        { description: searchRegex },
+        { category: searchRegex },
+        { keywords: searchRegex }, // Search within keywords array
+      ],
+    })
+      .populate("store", "name") // Populate store name for display
+      .limit(10); // Limit for performance
+
+    // Search Gigs
+    const gigs = await Gig.find({
+      $or: [
+        { productName: searchRegex },
+        { description: searchRegex },
+        { category: searchRegex },
+        { keywords: searchRegex },
+      ],
+    })
+      .populate("store", "name")
+      .limit(10);
+
+    // Search Games
+    const games = await Game.find({
+      $or: [
+        { productName: searchRegex },
+        { description: searchRegex },
+        { category: searchRegex },
+        { keywords: searchRegex },
+      ],
+    })
+      .populate("store", "name")
+      .limit(10);
+
+    // Return combined results
+    res.status(200).json({
+      assets,
+      gigs,
+      games,
+    });
+  } catch (error) {
+    console.error("Search error:", error);
+    res.status(500).json({ message: "Server error during search" });
   }
 };
