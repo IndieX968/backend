@@ -10,14 +10,21 @@ connectDB();
 
 const app = express();
 
-  app.use((req, res, next) => {
-    res.setHeader("Access-Control-Allow-Origin", "http://localhost:5173");
+app.use((req, res, next) => {
+    const allowedOrigins = ["http://localhost:5173", "https://indiex-nu.vercel.app"];
+    
+    // Check if the origin matches one of the allowed origins
+    const origin = req.headers.origin;
+    if (allowedOrigins.includes(origin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+    }
+  
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
     res.setHeader("Access-Control-Allow-Credentials", "true");
   
     if (req.method === "OPTIONS") {
-      return res.sendStatus(200);
+      return res.sendStatus(200); // Preflight request
     }
   
     next();
