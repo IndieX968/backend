@@ -9,14 +9,19 @@ dotenv.config();
 connectDB();
 
 const app = express();
-app.use(cors({
-    origin: "*",
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  }));
+
+  app.use((req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "http://localhost:5173");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.setHeader("Access-Control-Allow-Credentials", "true");
   
-// Handle preflight requests for all routes
-app.options("*", cors());
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(200);
+    }
+  
+    next();
+  });
   
 // Middleware
 app.use(bodyParser.json());
