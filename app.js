@@ -10,25 +10,30 @@ connectDB();
 
 const app = express();
 
-app.use((req, res, next) => {
-    const allowedOrigins = ["http://localhost:5173", "https://indiex-nu.vercel.app"];
+const allowedOrigins = [
+  "http://localhost:5173", 
+  "https://indiex-nu.vercel.app",
+  "https://indiex-nu.vercel.app/" // Add with/without trailing slash
+];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
     
-    // Check if the origin matches one of the allowed origins
-    const origin = req.headers.origin;
-    if (allowedOrigins.includes(origin)) {
-      res.setHeader("Access-Control-Allow-Origin", origin);
+    if (allowedOrigins.indexOf(origin) === -1) {
+      const msg = `The CORS policy for this site does not allow access from the specified Origin: ${origin}`;
+      return callback(new Error(msg), false);
     }
-  
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-    res.setHeader("Access-Control-Allow-Credentials", "true");
-  
-    if (req.method === "OPTIONS") {
-      return res.sendStatus(200); // Preflight request
-    }
-  
-    next();
-  });
+    return callback(null, true);
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
+
+// Handle preflight requests
+app.options("*", cors());
   
 // Middleware
 app.use(bodyParser.json());
