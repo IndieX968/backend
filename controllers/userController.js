@@ -139,36 +139,36 @@ exports.updateUserRole = async (req, res) => {
 
 exports.createStore = async (req, res) => {
   const { userId, name, description, image } = req.body;
-
-  const fileBuffer = req.file.buffer; // Access the file buffer from memory
-  const fileFormat = req.file.mimetype.split("/")[1]; // Get the file format (e.g., 'jpg', 'png')
-  console.log(fileBuffer, fileFormat);
-  if (fileBuffer || fileFormat) {
     let imageUrl;
-    try {
-      // Upload the buffer directly to Cloudinary
-      const cloudinaryResponse = await uploadToCloudinary(
-        fileBuffer,
-        fileFormat
-      );
-
-      if (!cloudinaryResponse) {
+    const fileBuffer = req.file.buffer; // Access the file buffer from memory
+    const fileFormat = req.file.mimetype.split("/")[1]; // Get the file format (e.g., 'jpg', 'png')
+    if (fileBuffer || fileFormat) {
+     
+      try {
+        // Upload the buffer directly to Cloudinary
+        const cloudinaryResponse = await uploadToCloudinary(
+          fileBuffer,
+          fileFormat
+        );
+  
+        if (!cloudinaryResponse) {
+          return res
+            .status(500)
+            .json({ message: "Error uploading file to Cloudinary" });
+        }
+        imageUrl = cloudinaryResponse?.secure_url;
+      } catch (error) {
         return res
           .status(500)
-          .json({ message: "Error uploading file to Cloudinary" });
+          .json({ message: `Error uploading file: ${error.message}` });
       }
-      imageUrl = cloudinaryResponse.secure_url;
-    } catch (error) {
-      return res
-        .status(500)
-        .json({ message: `Error uploading file: ${error.message}` });
-    }
-  }
-
+    
+  
+  }  
+ 
   if (!userId || !name || !description) {
     return res.status(400).json({ message: "All fields are required" });
   }
-
   try {
     const { userId, name, description } = req.body;
     const store = new Store({
@@ -180,6 +180,7 @@ exports.createStore = async (req, res) => {
     await store.save();
     res.status(201).json({ message: "Store created successfully", store });
   } catch (error) {
+
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
