@@ -13,7 +13,8 @@ const app = express();
 const allowedOrigins = [
   "http://localhost:5173", 
   "https://indiex-nu.vercel.app",
-  "https://indiex-nu.vercel.app/" // Add with/without trailing slash
+  "https://indiex-nu.vercel.app/",
+  "*" 
 ];
 
 app.use(cors({
